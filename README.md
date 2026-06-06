@@ -277,6 +277,628 @@ while(cur != NULL){
 
 ---
 
+## 6.3. Penjelasan Parameter: Global vs Lokal vs Argumen
+
+Banyak yang bingung: "Parameter fungsi ini dari mana? Apakah global?"
+
+Mari kita bedah satu per satu. Ada **tiga sumber** data di fungsi:
+
+| Sumber | Contoh | Karakteristik |
+|---|---|---|
+| **Global** | `buf`, `undoStack`, `redoStack`, `namaFile`, `modified` | Dideklarasikan di luar semua fungsi (di `main.c`). Semua fungsi bisa baca/tulis. |
+| **Parameter / Argumen** | `TextBuffer *buf`, `int nomor`, `char *teks` | Dikirim dari fungsi pemanggil. Hanya ada di fungsi ini. Bisa dari global atau lokal pemanggil. |
+| **Variabel Lokal** | `Node *node`, `int len`, `int i` | Dibuat di dalam fungsi. Hidup dan mati di dalam fungsi. Tidak bisa diakses luar. |
+
+---
+
+### A. Konsep: `TextBuffer *buf` (Pointer) — Mengapa?
+
+Kalau fungsi mau **mengubah** `totalLines`, `currentRow`, atau `head` dari `TextBuffer`, maka harus pakai pointer.
+
+**Analogi:**
+- **Tanpa pointer** (`TextBuffer buf`): Kirim fotokopi. Yang diubah adalah fotokopi, aslinya tetap.
+- **Dengan pointer** (`TextBuffer *buf`): Kirim alamat rumah. Langsung ke rumah asli dan ubah.
+
+Semua fungsi di `Anand.c`, `Firdaus.c`, `Faiq.c`, `file.c` pakai `TextBuffer *buf` karena mereka semua mau mengubah isi buffer (nambah baris, hapus baris, geser kursor, dll).
+
+---
+
+### B. Konsep: `char *teks` — Bukan Pointer untuk Ubah, tapi untuk Efisiensi
+
+`char *teks` di `bufferInsert` atau `bufferInsertBaris` sebenarnya **tidak perlu ubah** teks asli. Tapi pakai pointer karena:
+1. String di C secara alami sudah pointer (`char *`).
+2. Menghindari copy besar ke stack (kalau `char teks[200]` jadi parameter, nanti fotokopi 200 byte).
+
+---
+
+### C. Tabel Lengkap: Parameter Setiap Fungsi
+
+#### `Faiq.c` — `bufferInit()`
+
+```c
+void bufferInit(TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `main.c` atau `file.c` | Bisa dari global (`&buf`), bisa dari lokal | Supaya bisa ubah `head`, `totalLines`, `currentRow` |
+
+**Variabel lokal di dalamnya:**
+- `Node *awal`: Menampung hasil `malloc`. Hidup sebentar, lalu disalin ke `buf->head`.
+
+**Logika:**
+- `awal == NULL`: Kalau `malloc` gagal, `buf` tetap harus di-set aman (`head = NULL`, `totalLines = 0`).
+
+---
+
+#### `Faiq.c` — `stackInit()`
+
+```c
+void stackInit(Stack *s)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Stack *s` | Dikirim dari `main.c` | Global (`&undoStack`, `&redoStack`) | Supaya bisa ubah `entries` dan `top` |
+
+**Variabel lokal di dalamnya:**
+- `int i`: Counter loop. Hidup cuma di dalam `for`.
+
+**Logika:**
+- Loop `i < HISTORY_SIZE`: Membersihkan 20 slot. `i` tidak perlu diingat di luar fungsi.
+
+---
+
+#### `Faiq.c` — `stackPush()`
+
+```c
+void stackPush(Stack *s, TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Stack *s` | Dikirim dari `bufferPushUndo` | Global (`&undoStack` atau `&redoStack`) | Supaya bisa tambah snapshot ke stack |
+| `TextBuffer *buf` | Dikirim dari `bufferPushUndo` | Global (`&buf`) | Supaya bisa baca `head`, `totalLines`, `currentRow` untuk disalin |
+
+**Variabel lokal di dalamnya:**
+- `int j`: Counter untuk salin teks per karakter.
+- `Node *cur`: Pointer jalan-jalan di `buf->head` (sama seperti `getNode`, tapi manual).
+- `Node *newNode`: Node baru untuk snapshot.
+- `Node *snapHead`, `Node *snapTail`: Penjaga awal dan akhir rantai snapshot.
+
+**Logika:**
+- `snapHead == NULL`: Cek apakah ini node pertama di snapshot. Kalau ya, jadikan head.
+- `snapTail->next = newNode`: Kalau bukan pertama, sambung ke tail.
+- `snapTail = newNode`: Tail selalu menunjuk ke node terakhir.
+
+---
+
+#### `Faiq.c` — `stackPop()`
+
+```c
+int stackPop(Stack *s, TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Stack *s` | Dikirim dari `bufferUndo` atau `bufferRedo` | Global (`&undoStack` atau `&redoStack`) | Supaya bisa ambil snapshot teratas |
+| `TextBuffer *buf` | Dikirim dari `bufferUndo` atau `bufferRedo` | Global (`&buf`) | Supaya bisa timpa buffer lama dengan snapshot |
+
+**Variabel lokal di dalamnya:**
+- `Node *del`: Untuk jalan-jalan dan hapus buffer lama.
+- `Node *temp`: Menyimpan `del->next` sebelum `del` dihapus.
+
+**Logika:**
+- `temp = del->next`: Harus disimpan dulu sebelum `free(del)`, karena setelah `free`, `del->next` tidak bisa diakses lagi.
+
+---
+
+#### `Faiq.c` — `bufferPushUndo()`
+
+```c
+void bufferPushUndo(Stack *undo, Stack *redo, TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Stack *undo` | Dikirim dari `main.c` | Global (`&undoStack`) | Supaya bisa push snapshot ke undo |
+| `Stack *redo` | Dikirim dari `main.c` | Global (`&redoStack`) | Supaya bisa bersihkan redo stack |
+| `TextBuffer *buf` | Dikirim dari `main.c` | Global (`&buf`) | Supaya bisa dibaca untuk snapshot |
+
+**Variabel lokal di dalamnya:**
+- `Node *del`, `Node *tmp`: Untuk bersihkan redo stack.
+
+**Logika:**
+- `while (redo->top > 0)`: Bersihkan semua redo. Kalau user bikin perubahan baru, jalur redo lama dihapus.
+
+---
+
+#### `Faiq.c` — `bufferUndo()`
+
+```c
+int bufferUndo(Stack *undo, Stack *redo, TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Stack *undo` | Dikirim dari `main.c` | Global (`&undoStack`) | Supaya bisa pop |
+| `Stack *redo` | Dikirim dari `main.c` | Global (`&redoStack`) | Supaya bisa push buffer sekarang |
+| `TextBuffer *buf` | Dikirim dari `main.c` | Global (`&buf`) | Supaya bisa dikembalikan ke kondisi lama |
+
+**Variabel lokal:** Tidak ada. Langsung panggil `stackPush` dan `stackPop`.
+
+**Logika:**
+- `undo->top == 0`: Kalau undo kosong, return 0 (gagal).
+- `stackPush(redo, buf)`: Simpan kondisi sekarang ke redo, supaya bisa redo nanti.
+- `stackPop(undo, buf)`: Kembalikan ke snapshot terakhir di undo.
+
+---
+
+#### `Faiq.c` — `bufferRedo()`
+
+```c
+int bufferRedo(Stack *undo, Stack *redo, TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| Sama persis seperti `bufferUndo` | Sama persis | Sama persis | Sama persis, cuma arahnya balik |
+
+**Logika:**
+- `redo->top == 0`: Kalau redo kosong, gagal.
+- `stackPush(undo, buf)`: Simpan kondisi sekarang ke undo.
+- `stackPop(redo, buf)`: Pop dari redo.
+
+---
+
+#### `Firdaus.c` — `getNode()`
+
+```c
+Node *getNode(TextBuffer *buf, int n)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari fungsi lain | Biasanya global (`&buf`) | Supaya bisa baca `buf->head` |
+| `int n` | Dikirim dari fungsi lain | Biasanya lokal pemanggil | Bukan pointer, cuma angka. Tidak perlu diubah. |
+
+**Variabel lokal di dalamnya:**
+- `Node *pointer`: Menyalin `buf->head`, lalu jalan ke depan. **Ini bukan `buf->head` itu sendiri!** `buf->head` tidak berubah.
+- `int i`: Counter loop.
+
+**Logika:**
+- `pointer = buf->head`: Menyalin alamat. Sekarang `pointer` dan `buf->head` menunjuk ke node yang sama, tapi mereka dua variabel berbeda.
+- `pointer = pointer->next`: `pointer` pindah ke node berikutnya. `buf->head` tetap di node pertama.
+- `pointer == NULL`: Kalau rantai habis sebelum sampai ke `n`, return NULL.
+
+---
+
+#### `Firdaus.c` — `bufferGoto()`
+
+```c
+void bufferGoto(TextBuffer *buf, int nomor)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdGoto` | Global (`&buf`) | Supaya bisa ubah `currentRow` |
+| `int nomor` | Dikirim dari `cmdGoto` | Lokal di `cmdGoto` (hasil `atoi(argumen)`) | Bukan pointer, cuma angka yang dicek |
+
+**Variabel lokal:** Tidak ada.
+
+**Logika:**
+- `nomor < 1`: Batas bawah. Kalau user ketik `g 0`, anggap `g 1`.
+- `nomor > buf->totalLines`: Batas atas. Kalau user ketik `g 999`, anggap baris terakhir.
+- `buf->currentRow = nomor - 1`: Ubah currentRow. Ini mengubah variabel global!
+
+**Mengapa `nomor` tidak global?**
+Karena `nomor` datang dari input user. Setiap kali user ketik `g 3`, `g 5`, `g 1`, angkanya beda. Tidak mungkin disimpan global.
+
+---
+
+#### `Firdaus.c` — `bufferInsert()`
+
+```c
+void bufferInsert(TextBuffer *buf, char *teks)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdInsert` | Global (`&buf`) | Supaya bisa ubah `currentRow` dan `head` |
+| `char *teks` | Dikirim dari `cmdInsert` | Lokal/argumen dari user | String di C memang pointer. Tidak diubah, cuma dibaca. |
+
+**Variabel lokal di dalamnya:**
+- `Node *node`: Hasil dari `getNode(buf, buf->currentRow)`. Menunjuk ke baris aktif.
+- `int len`: Panjang teks dari `strlen(teks)`.
+- `int i`: Counter loop.
+
+**Logika:**
+- `node == NULL`: Safety. Kalau `getNode` gagal, tidak usah lanjut.
+- `node->length >= MAX_COL - 1`: Batas penuh. Kalau baris sudah 199 karakter, berhenti.
+- `node->text[node->length] = teks[i]`: Tulis ke posisi kosong pertama.
+- `node->length++`: Naikkan penghitung.
+
+---
+
+#### `Firdaus.c` — `bufferBackspace()`
+
+```c
+void bufferBackspace(TextBuffer *buf, int n)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdHapusKarakter` | Global (`&buf`) | Supaya bisa baca `currentRow` dan ubah node aktif |
+| `int n` | Dikirim dari `cmdHapusKarakter` | Lokal (hasil `atoi(argumen)`, default 1) | Bukan pointer, cuma angka berapa karakter yang dihapus |
+
+**Variabel lokal di dalamnya:**
+- `Node *node`: Hasil `getNode`. Menunjuk ke baris aktif.
+- `int i`: Counter loop.
+
+**Logika:**
+- `node->length == 0`: Kalau baris sudah kosong, berhenti. Jangan jadi negatif.
+- `node->length--`: Turunkan penghitung.
+- `node->text[node->length] = '\0'`: Timpa posisi terakhir dengan kosong.
+
+---
+
+#### `Anand.c` — `allocNode()`
+
+```c
+Node *allocNode(void)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| Tidak ada parameter | — | — | — |
+
+**Return value:** `Node *` (pointer ke node baru).
+
+**Variabel lokal di dalamnya:**
+- `Node *node`: Hasil `malloc`. Hidup sebentar, lalu return ke pemanggil.
+
+**Logika:**
+- `node == NULL`: Kalau `malloc` gagal, return NULL. Pemanggil harus cek ini.
+
+---
+
+#### `Anand.c` — `freeNode()`
+
+```c
+void freeNode(Node *node)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `Node *node` | Dikirim dari fungsi lain | Biasanya lokal pemanggil | Harus pointer supaya bisa `free()` memori di heap |
+
+**Logika:**
+- `node == NULL`: Kalau sudah NULL, tidak usah `free` (double-free bisa crash).
+
+---
+
+#### `Anand.c` — `bufferInsertBaris()`
+
+```c
+void bufferInsertBaris(TextBuffer *buf, char *teks)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdInsertBaris` | Global (`&buf`) | Supaya bisa sisip node baru, ubah `totalLines` dan `currentRow` |
+| `char *teks` | Dikirim dari `cmdInsertBaris` | Lokal dari user | String, tidak diubah |
+
+**Variabel lokal di dalamnya:**
+- `Node *baru`: Hasil `allocNode()`. Node baru yang akan disisipkan.
+- `Node *current`: Hasil `getNode(buf, buf->currentRow)`. Node tempat kita sisipkan di belakangnya.
+
+**Logika:**
+- `baru->next = current->next`: Node baru menunjuk ke node yang tadinya di belakang current.
+- `current->next = baru`: Current sekarang menunjuk ke node baru.
+- `buf->currentRow++` dan `buf->totalLines++`: Update catatan stasiun.
+
+---
+
+#### `Anand.c` — `bufferHapusBaris()`
+
+```c
+void bufferHapusBaris(TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdHapusBaris` | Global (`&buf`) | Supaya bisa hapus node, ubah `head`, `totalLines`, `currentRow` |
+
+**Variabel lokal di dalamnya:**
+- `Node *satu`: Untuk kondisi `totalLines == 1`.
+- `Node *hapus`: Node yang akan dihapus.
+- `Node *prev`: Node sebelum node yang dihapus.
+
+**Logika:**
+- `totalLines == 1`: Jangan hapus node, cuma kosongkan isi. Supaya `head` tidak hilang.
+- `currentRow == 0`: Hapus `head`. Geser `head` ke node kedua.
+- `hapus->next == NULL`: Kalau hapus node terakhir, turunkan `currentRow` supaya tidak menunjuk ke tempat kosong.
+
+---
+
+#### `file.c` — `fileOpen()`
+
+```c
+int fileOpen(TextBuffer *buf, char *filename)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdBuka` | Global (`&buf`) | Supaya bisa hapus buffer lama, isi buffer baru |
+| `char *filename` | Dikirim dari `cmdBuka` | Lokal dari user (argumen) | String, tidak diubah |
+
+**Variabel lokal di dalamnya:**
+- `FILE *fp`: Pointer ke file. Hidup sebentar, ditutup sebelum return.
+- `char barisTemp[MAX_COL + 4]`: Tempat menampung satu baris dari file. `+4` untuk jaga-jaga `\r\n`.
+- `int firstLine`: Penanda. `1` = ini baris pertama, `0` = bukan.
+- `int len`: Panjang baris sementara.
+
+**Logika:**
+- `firstLine == 1`: Baris pertama pakai `bufferInsert` (nulis ke baris yang sudah ada). Baris selanjutnya pakai `bufferInsertBaris` (bikin baru).
+- `len > MAX_COL - 1`: Kalau file punya baris panjang, dipotong.
+
+---
+
+#### `file.c` — `fileSave()`
+
+```c
+int fileSave(TextBuffer *buf, char *filename)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdSimpan` | Global (`&buf`) | Supaya bisa baca `head` dan jalan-jalan node |
+| `char *filename` | Dikirim dari `cmdSimpan` | Lokal dari `namaFile` global | String, tidak diubah |
+
+**Variabel lokal di dalamnya:**
+- `FILE *fp`: Pointer ke file.
+- `Node *node`: Untuk jalan-jalan dari `buf->head`.
+
+**Logika:**
+- `node->next != NULL`: Kalau bukan node terakhir, tambah `\n` (newline). Supaya di file baris terpisah.
+
+---
+
+#### `file.c` — `fileClose()`
+
+```c
+void fileClose(TextBuffer *buf)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdTutup` atau `fileOpen` | Global (`&buf`) | Supaya bisa hapus semua node, set `head = NULL` |
+
+**Variabel lokal di dalamnya:**
+- `Node *cur`: Node yang sedang dihapus.
+- `Node *next`: Node berikutnya yang harus disimpan sebelum `cur` dihapus.
+
+**Logika:**
+- `next = cur->next`: Simpan dulu alamat berikutnya. Kalau tidak, setelah `free(cur)`, kita tidak bisa akses `cur->next`.
+
+---
+
+#### `replace.c` — `replaceText()`
+
+```c
+int replaceText(TextBuffer *buf, char *cari, char *ganti)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari `cmdReplace` | Global (`&buf`) | Supaya bisa baca dan ubah teks di setiap node |
+| `char *cari` | Dikirim dari `cmdReplace` | Lokal dari user | String, tidak diubah |
+| `char *ganti` | Dikirim dari `cmdReplace` | Lokal dari user | String, tidak diubah |
+
+**Variabel lokal di dalamnya:**
+- `int cariLen`, `int gantiLen`: Panjang string. Hidup di fungsi ini saja.
+- `int count`: Berapa kali ganti berhasil. Return value.
+- `Node *node`: Jalan-jalan di linked list.
+- `char temp[MAX_COL]`: Tempat sementara hasil replace.
+- `int tempLen`: Panjang teks di `temp`.
+- `int i`: Index baca di `node->text`.
+- `int rowLen`: Panjang baris asli.
+- `int replaced`: Penanda apakah baris ini berubah.
+
+**Logika:**
+- `i <= rowLen - cariLen`: Cek apakah masih ada cukup ruang untuk `cari`. Kalau sisa cuma 2 huruf, tapi `cari` panjang 5, percuma.
+- `memcmp(...) == 0`: Bandingkan byte per byte. Kalau cocok, ganti.
+- `replaced`: Kalau baris tidak berubah, tidak perlu salin balik ke `node->text`.
+
+---
+
+#### `display.c` — `displayBuffer()`
+
+```c
+void displayBuffer(TextBuffer *buf, char *namaFile, int modified)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `TextBuffer *buf` | Dikirim dari semua `cmd` | Global (`&buf`) | Supaya bisa baca `head`, `totalLines`, `currentRow` |
+| `char *namaFile` | Dikirim dari semua `cmd` | Global (`namaFile`) | String, tidak diubah |
+| `int modified` | Dikirim dari semua `cmd` | Global (`modified`) | Bukan pointer, cuma angka 0 atau 1 |
+
+**Variabel lokal di dalamnya:**
+- `Node *cur`: Jalan-jalan di linked list.
+- `int i`: Counter nomor baris (0, 1, 2...).
+- `char penanda`: `'>'` atau `' '`.
+- `char *tampilNama`: Pointer ke string yang ditampilkan (bisa `namaFile` atau `"(belum disimpan)"`).
+- `char *tampilModified`: `" [*]"` atau `""`.
+
+**Logika:**
+- `namaFile[0] != '\0'`: Cek apakah string tidak kosong. `\0` di index 0 artinya string kosong.
+- `i == buf->currentRow`: Cek apakah ini baris aktif.
+
+---
+
+#### `main.c` — `tanyaKonfirmasi()`
+
+```c
+int tanyaKonfirmasi(char *pertanyaan)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `char *pertanyaan` | Dikirim dari `cmdBuka`, `cmdTutup`, `cmdKeluar`, `cmdHapusFile` | Lokal (string literal) | String, tidak diubah. Cuma dibaca dan dicetak. |
+
+**Return value:** `int` — `1` (ya) atau `0` (tidak).
+
+**Variabel lokal di dalamnya:**
+- `char jawab[8]`: Tempat menampung jawaban user. Hanya 8 karakter, cukup untuk `y\n` atau `n\n`.
+
+---
+
+#### `main.c` — `bersihkanNewline()`
+
+```c
+void bersihkanNewline(char *str)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `char *str` | Dikirim dari `cmdReplace` | Lokal (array `cari` atau `ganti`) | Harus pointer supaya bisa ubah isi string (hapus `\n` dan `\r`) |
+
+**Perbedaan dengan `char *teks` di `bufferInsert`:**
+- `bufferInsert` → `teks` tidak diubah, cuma dibaca. Tapi tetap pakai pointer karena string di C memang pointer.
+- `bersihkanNewline` → `str` **diubah** (karakter terakhir diganti `\0`). Makanya harus pointer.
+
+**Variabel lokal di dalamnya:**
+- `int len`: Panjang string. `strlen(str)`.
+
+---
+
+#### `main.c` — `cmdInsert()`
+
+```c
+void cmdInsert(char *teks)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `char *teks` | Dikirim dari `prosesPerintah` | Lokal dari `argumen` (hasil parsing `sscanf`) | String, tidak diubah |
+
+**Variabel yang diakses (global):**
+- `buf`, `undoStack`, `redoStack`, `namaFile`, `modified` — semua global dari `main.c`.
+
+**Variabel lokal di dalamnya:**
+- `int row`: Menyimpan `buf.currentRow` sebelum diubah. Untuk pesan `[OK] Baris %d`.
+- `Node *node`: Hasil `getNode`. Menunjuk ke baris aktif.
+
+**Logika:**
+- `teks[0] == '\0'`: Kalau user cuma ketik `i` tanpa teks, kasih pesan info.
+- `bufferPushUndo`: Simpan kondisi sekarang ke undo.
+- `node != NULL && node->length > 0`: Kalau baris sudah ada isi, tambah spasi dulu.
+- `modified = 1`: Tandai ada perubahan. Ini mengubah variabel global!
+- `displayBuffer`: Refresh layar. Panggil fungsi global.
+
+---
+
+#### `main.c` — `cmdGoto()`
+
+```c
+void cmdGoto(char *argumen)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `char *argumen` | Dikirim dari `prosesPerintah` | Lokal dari `sscanf` | String, diubah ke angka pakai `atoi` |
+
+**Variabel lokal di dalamnya:**
+- `int nomor`: Hasil `atoi(argumen)`. **Ini adalah angka yang dikirim ke `bufferGoto`!**
+
+**Logika:**
+- `argumen[0] == '\0'`: Kalau tidak ada angka, error.
+- `nomor = atoi(argumen)`: Ubah string jadi angka. `atoi("3")` → `3`.
+- `nomor < 1`: Kalau angkanya tidak valid (negatif, nol, atau huruf), error.
+- `bufferGoto(&buf, nomor)`: Kirim angka ke fungsi inti. `&buf` adalah global, `nomor` adalah lokal.
+
+**Mengapa `nomor` tidak global?**
+Karena setiap kali user panggil `g 3`, `g 5`, `g 1`, angkanya beda. Global tidak bisa menampung banyak nilai sekaligus. Jadi dibuat lokal, diproses, lalu dibuang.
+
+---
+
+#### `main.c` — `prosesPerintah()`
+
+```c
+void prosesPerintah(char *input)
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `char *input` | Dikirim dari `main()` | Lokal (`cmd` di `main()`) | String, tidak diubah. Cuma dibaca dan diparsing. |
+
+**Variabel lokal di dalamnya:**
+- `char perintah[16]`: Menampung perintah (misal `"i"`, `"ia"`, `"g"`). Maksimal 15 karakter.
+- `char argumen[CMD_MAX]`: Menampung argumen (misal `"Halo dunia"`, `"3"`, `"catatan.txt"`). Maksimal 511 karakter.
+
+**Logika:**
+- `sscanf(input, "%15s %511[^\n]", perintah, argumen)`:
+  - `%15s`: Baca maksimal 15 karakter non-spasi. Simpan ke `perintah`.
+  - `%511[^\n]`: Baca maksimal 511 karakter, sampai ketemu enter. Simpan ke `argumen`.
+  - Contoh: input `"i Halo dunia"` → `perintah="i"`, `argumen="Halo dunia"`.
+  - Contoh: input `"g 3"` → `perintah="g"`, `argumen="3"`.
+  - Contoh: input `"dl"` → `perintah="dl"`, `argumen=""` (kosong).
+
+- `strcmp(perintah, "i") == 0`: Bandingkan string. Kalau cocok, panggil `cmdInsert(argumen)`.
+- `else`: Kalau tidak ada yang cocok, berarti perintah tidak dikenal.
+
+---
+
+#### `main.c` — `main()`
+
+```c
+int main(int argc, char *argv[])
+```
+
+| Parameter | Dari Mana | Global/Lokal? | Kenapa Pointer? |
+|---|---|---|---|
+| `int argc` | Dari sistem operasi | — | Bukan pointer. Jumlah argumen command line. |
+| `char *argv[]` | Dari sistem operasi | — | Array of string. `argv[0]` = nama program, `argv[1]` = argumen pertama. |
+
+**Variabel global (dideklarasikan di sini):**
+- `TextBuffer buf;`
+- `Stack undoStack;`
+- `Stack redoStack;`
+- `char namaFile[256];`
+- `int modified;`
+
+**Variabel lokal di dalamnya:**
+- `char cmd[CMD_MAX]`: Menampung input user dari `fgets`.
+- `int len`: Panjang input setelah dihapus newline.
+
+**Logika:**
+- `argc > 1`: Kalau user menjalankan program dengan argumen (misal `./editor catatan.txt`), langsung buka file.
+- `argv[1]`: Argumen pertama. Di sini berisi nama file.
+- `fgets(cmd, sizeof(cmd), stdin)`: Baca satu baris dari keyboard. Tunggu user tekan Enter.
+- `!fgets(...)`: Kalau gagal (EOF, Ctrl+D), `break` keluar dari loop.
+- `len == 0`: Kalau user cuma tekan Enter, `continue` (tidak proses, tampil prompt lagi).
+- `prosesPerintah(cmd)`: Kirim ke router untuk diproses.
+
+---
+
+### Ringkasan: Global vs Lokal vs Parameter
+
+| Nama | Lokasi | Sifat | Fungsi yang Mengakses |
+|---|---|---|---|
+| `buf` | `main.c` baris 12 | **Global** | Hampir semua fungsi via `&buf` |
+| `undoStack` | `main.c` baris 13 | **Global** | `bufferPushUndo`, `bufferUndo`, `cmdBuka`, `cmdTutup` |
+| `redoStack` | `main.c` baris 14 | **Global** | Sama seperti undoStack |
+| `namaFile` | `main.c` baris 15 | **Global** | `cmdBuka`, `cmdSimpan`, `cmdTutup`, `displayBuffer` |
+| `modified` | `main.c` baris 16 | **Global** | Hampir semua `cmd` dan `displayBuffer` |
+| `nomor` di `cmdGoto` | Dalam `cmdGoto` | **Lokal** | Cuma di `cmdGoto`, lalu dikirim ke `bufferGoto` |
+| `argumen` di `cmdBuka` | Parameter dari `prosesPerintah` | **Parameter/Lokal** | Diterima, lalu dipakai |
+| `jumlah` di `cmdHapusKarakter` | Dalam `cmdHapusKarakter` | **Lokal** | Dihitung dari `atoi(argumen)`, lalu dikirim ke `bufferBackspace` |
+| `i` di `bufferInsert` | Dalam `bufferInsert` | **Lokal** | Counter loop, mati setelah loop selesai |
+| `node` di `bufferInsert` | Dalam `bufferInsert` | **Lokal** | Hasil `getNode`, hidup sebentar |
+
+---
+
 ## 7. Fungsi-fungsi Dasar
 
 Pertanyaan yang sering muncul: "`head` kan bertipe `Node`, dia punya `text`, `length`, `next`. Apakah ini digunakan?"
