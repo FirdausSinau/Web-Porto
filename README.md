@@ -153,8 +153,16 @@ void bufferInit(TextBuffer *buf) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer yang akan diinisialisasi. |
+| `buf` | Argumen | Parameter | Pointer ke buffer yang akan diinisialisasi. Diterima dari `main()` (saat mulai), `fileOpen()` (saat buka file), `cmdTutup()` (saat tutup buffer). |
 | `awal` | Lokal | Variabel lokal | Menampung hasil `malloc`. Hidup sebentar, lalu disalin ke `buf->head`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `main()` | Saat program mulai | `&buf` (buffer global) |
+| `fileOpen()` | Sebelum membaca file baru | `&buf` (buffer global) |
+| `cmdTutup()` | Setelah menutup buffer lama | `&buf` (buffer global) |
 
 **Penjelasan baris per baris:**
 
@@ -203,8 +211,16 @@ void stackInit(Stack *s) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `s` | Argumen | Parameter | Pointer ke stack yang akan diinisialisasi. |
+| `s` | Argumen | Parameter | Pointer ke stack yang akan diinisialisasi. Diterima dari `main()`, `cmdBuka()`, `cmdTutup()`. |
 | `i` | Lokal | Variabel lokal | Counter loop. Hidup cuma di dalam `for`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `main()` | Saat program mulai | `&undoStack`, `&redoStack` (stack global) |
+| `cmdBuka()` | Setelah berhasil membuka file | `&undoStack`, `&redoStack` (stack global) |
+| `cmdTutup()` | Setelah menutup buffer | `&undoStack`, `&redoStack` (stack global) |
 
 **Penjelasan:**
 
@@ -281,13 +297,21 @@ void stackPush(Stack *s, TextBuffer *buf) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `s` | Argumen | Parameter | Pointer ke stack tujuan. |
-| `buf` | Argumen | Parameter | Pointer ke buffer yang akan difotokopi. |
+| `s` | Argumen | Parameter | Pointer ke stack tujuan. Diterima dari `bufferPushUndo()` atau `bufferUndo()`/`bufferRedo()`. |
+| `buf` | Argumen | Parameter | Pointer ke buffer yang akan difotokopi. Diterima dari fungsi pemanggil. |
 | `j` | Lokal | Variabel lokal | Counter untuk salin teks per karakter. |
 | `cur` | Lokal | Variabel lokal | Pointer yang mengikuti field `next` dari `buf->head` ke ujung rantai. |
 | `newNode` | Lokal | Variabel lokal | Node baru untuk snapshot. |
 | `snapHead` | Lokal | Variabel lokal | Penjaga awal rantai snapshot. |
 | `snapTail` | Lokal | Variabel lokal | Penjaga akhir rantai snapshot. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `bufferPushUndo()` | Sebelum user mengubah teks | `&undoStack`, `&buf` (saat simpan undo) |
+| `bufferUndo()` | Sebelum pop dari undo | `&redoStack`, `&buf` (simpan ke redo dulu) |
+| `bufferRedo()` | Sebelum pop dari redo | `&undoStack`, `&buf` (simpan ke undo dulu) |
 
 **Penjelasan baris per baris:**
 
@@ -349,10 +373,17 @@ int stackPop(Stack *s, TextBuffer *buf) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `s` | Argumen | Parameter | Pointer ke stack sumber. |
-| `buf` | Argumen | Parameter | Pointer ke buffer yang akan ditimpa dengan snapshot. |
+| `s` | Argumen | Parameter | Pointer ke stack sumber. Diterima dari `bufferUndo()` atau `bufferRedo()`. |
+| `buf` | Argumen | Parameter | Pointer ke buffer yang akan ditimpa dengan snapshot. Diterima dari fungsi pemanggil. |
 | `del` | Lokal | Variabel lokal | Pointer untuk menghapus buffer lama. Mengikuti field `next` dari node ke node berikutnya. |
 | `temp` | Lokal | Variabel lokal | Menyimpan `del->next` sebelum `del` dihapus. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `bufferUndo()` | Saat user undo | `&undoStack`, `&buf` (ambil snapshot dari undo) |
+| `bufferRedo()` | Saat user redo | `&redoStack`, `&buf` (ambil snapshot dari redo) |
 
 **Penjelasan baris per baris:**
 
@@ -409,6 +440,29 @@ void bufferPushUndo(Stack *undo, Stack *redo, TextBuffer *buf) {
 | `del` | Lokal | Variabel lokal | Pointer untuk menghapus snapshot redo. |
 | `tmp` | Lokal | Variabel lokal | Menyimpan `del->next` sebelum `del` dihapus. |
 
+**Dipanggil oleh `bufferPushUndo`:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdInsert()` | Sebelum menulis teks | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+| `cmdInsertBaris()` | Sebelum membuat baris baru | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+| `cmdHapusKarakter()` | Sebelum menghapus karakter | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+| `cmdHapusBaris()` | Sebelum menghapus baris | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+| `cmdReplace()` | Sebelum replace | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+| `cmdBuka()` | Setelah berhasil buka file | `&undoStack`, `&redoStack`, `&buf` (tapi setelah buka file, stack di-reset) |
+
+**Dipanggil oleh `bufferUndo`:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdUndo()` | Saat user tekan `u` | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+
+**Dipanggil oleh `bufferRedo`:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdRedo()` | Saat user tekan `r` | `&undoStack`, `&redoStack`, `&buf` (semua global) |
+
 ```c
 int bufferUndo(Stack *undo, Stack *redo, TextBuffer *buf) {
     if (undo->top == 0) return 0;
@@ -464,9 +518,29 @@ Node *getNode(TextBuffer *buf, int n) {
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
 | `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `n` | Argumen | Parameter | Index gerbong yang dicari (0-based). |
+| `n` | Argumen | Parameter | Index gerbong yang dicari (0-based). Dikirim oleh fungsi lain yang memanggil `getNode`. |
 | `pointer` | Lokal | Variabel lokal | Menyalin `buf->head`, lalu mengikuti field `next` ke depan. `buf->head` sendiri tidak berubah. |
 | `i` | Lokal | Variabel lokal | Counter loop. |
+
+**Dipanggil oleh `getNode`:**
+
+| Pemanggil | Nilai `n` yang dikirim | Keterangan |
+|-----------|------------------------|------------|
+| `bufferInsert()` | `buf->currentRow` | Index baris aktif untuk menulis teks. |
+| `bufferBackspace()` | `buf->currentRow` | Index baris aktif untuk menghapus karakter. |
+| `bufferInsertBaris()` | `buf->currentRow` | Index baris aktif untuk disisipkan di belakangnya. |
+| `bufferHapusBaris()` | `buf->currentRow` | Index baris aktif yang akan dihapus. |
+| `bufferHapusBaris()` | `buf->currentRow - 1` | Index baris sebelumnya untuk mencari tetangga (`prev`). |
+
+| Pemanggil | Nilai `n` yang dikirim | Keterangan |
+|-----------|------------------------|------------|
+| `bufferInsert()` | `buf->currentRow` | Index baris aktif untuk menulis teks. |
+| `bufferBackspace()` | `buf->currentRow` | Index baris aktif untuk menghapus karakter. |
+| `bufferInsertBaris()` | `buf->currentRow` | Index baris aktif untuk disisipkan di belakangnya. |
+| `bufferHapusBaris()` | `buf->currentRow` | Index baris aktif yang akan dihapus. |
+| `bufferHapusBaris()` | `buf->currentRow - 1` | Index baris sebelumnya untuk mencari tetangga (`prev`). |
+| `bufferInit()` | — | Tidak memanggil `getNode`. |
+| `cmdGoto()` (via `bufferGoto`) | — | `bufferGoto` tidak memanggil `getNode`, tapi mengubah `currentRow` yang nanti dipakai oleh fungsi lain di atas. |
 
 **Penjelasan baris per baris:**
 
@@ -506,8 +580,15 @@ void bufferGoto(TextBuffer *buf, int nomor) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `nomor` | Argumen | Parameter | Nomor baris dari user (1-based). |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdGoto()`. |
+| `nomor` | Argumen | Parameter | Nomor baris dari user (1-based). Diterima dari `cmdGoto()` (hasil `atoi(argumen)`). |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdGoto()` | Saat user tekan `g <nomor>` | `&buf` (global), `nomor` (hasil `atoi` dari input user) |
+| `fileOpen()` | Setelah selesai membaca file | `&buf` (global), `1` (pindah ke baris pertama) |
 
 **Penjelasan:**
 
@@ -553,11 +634,19 @@ void bufferInsert(TextBuffer *buf, char *teks) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `teks` | Argumen | Parameter | String yang akan ditambahkan. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdInsert()` atau `fileOpen()`. |
+| `teks` | Argumen | Parameter | String yang akan ditambahkan. Diterima dari `cmdInsert()` (argumen dari user) atau `fileOpen()` (baris dari file). |
 | `node` | Lokal | Variabel lokal | Hasil dari `getNode`. Menunjuk ke baris aktif. |
 | `len` | Lokal | Variabel lokal | Panjang teks dari `strlen(teks)`. |
 | `i` | Lokal | Variabel lokal | Counter loop. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdInsert()` | Saat user tekan `i <teks>` | `&buf` (global), `teks` (argumen dari user) |
+| `fileOpen()` | Saat membaca baris pertama file | `&buf` (global), `barisTemp` (baris dari file) |
+| `cmdInsert()` | Saat menambah spasi pemisah | `&buf` (global), `" "` (string literal spasi) |
 
 **Penjelasan baris per baris:**
 
@@ -604,10 +693,16 @@ void bufferBackspace(TextBuffer *buf, int n) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `n` | Argumen | Parameter | Jumlah karakter yang dihapus. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdHapusKarakter()`. |
+| `n` | Argumen | Parameter | Jumlah karakter yang dihapus. Diterima dari `cmdHapusKarakter()` (hasil `atoi(argumen)`, default 1). |
 | `node` | Lokal | Variabel lokal | Hasil `getNode`. Menunjuk ke baris aktif. |
 | `i` | Lokal | Variabel lokal | Counter loop. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdHapusKarakter()` | Saat user tekan `d [n]` | `&buf` (global), `jumlah` (hasil `atoi` dari argumen user) |
 
 **Penjelasan:**
 
@@ -652,6 +747,13 @@ Node *allocNode(void) {
 |----------|--------|-------|------------|
 | `node` | Lokal | Variabel lokal | Hasil `malloc`. Hidup sebentar, lalu return ke pemanggil. |
 
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Return value yang diterima |
+|-----------|-----------------|---------------------------|
+| `bufferInit()` | Saat membuat buffer baru | `Node *` (dijadikan `buf->head`) |
+| `bufferInsertBaris()` | Saat membuat baris baru | `Node *` (disisipkan ke linked list) |
+
 ---
 
 ### 4.11. `Anand.c` — `freeNode()`
@@ -677,6 +779,16 @@ void freeNode(Node *node) {
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
 | `node` | Argumen | Parameter | Pointer ke node yang akan dihapus. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `bufferHapusBaris()` | Saat menghapus baris aktif | `hapus` (node yang akan dihapus) |
+| `fileClose()` | Saat menutup buffer | `cur` (node yang sedang dihapus dalam loop) |
+| `stackPush()` | Saat stack penuh (hapus snapshot lama) | `del` (snapshot lama yang dihapus) |
+| `stackPop()` | Saat mengganti buffer dengan snapshot | `del` (buffer lama yang dihapus) |
+| `bufferPushUndo()` | Saat membersihkan redo stack | `del` (snapshot redo yang dihapus) |
 
 ---
 
@@ -718,10 +830,17 @@ void bufferInsertBaris(TextBuffer *buf, char *teks) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `teks` | Argumen | Parameter | String yang akan dimasukkan ke baris baru. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdInsertBaris()` atau `fileOpen()`. |
+| `teks` | Argumen | Parameter | String yang akan dimasukkan ke baris baru. Diterima dari `cmdInsertBaris()` (argumen dari user) atau `fileOpen()` (baris dari file). |
 | `baru` | Lokal | Variabel lokal | Hasil `allocNode()`. Gerbong baru yang akan disisipkan. |
 | `current` | Lokal | Variabel lokal | Hasil `getNode`. Gerbong tempat kita sisipkan di belakangnya. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdInsertBaris()` | Saat user tekan `ia <teks>` | `&buf` (global), `teks` (argumen dari user) |
+| `fileOpen()` | Saat membaca baris kedua dan seterusnya dari file | `&buf` (global), `barisTemp` (baris dari file) |
 
 **Penjelasan baris per baris:**
 
@@ -794,10 +913,16 @@ void bufferHapusBaris(TextBuffer *buf) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdHapusBaris()`. |
 | `satu` | Lokal | Variabel lokal | Untuk kondisi `totalLines == 1`. |
 | `hapus` | Lokal | Variabel lokal | Gerbong yang akan dihapus. |
 | `prev` | Lokal | Variabel lokal | Gerbong sebelum gerbong yang dihapus. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdHapusBaris()` | Saat user tekan `dl` | `&buf` (global) |
 
 **Penjelasan baris per baris:**
 
@@ -885,12 +1010,19 @@ int fileOpen(TextBuffer *buf, char *filename) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `filename` | Argumen | Parameter | Nama file yang akan dibuka. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdBuka()` atau `main()`. |
+| `filename` | Argumen | Parameter | Nama file yang akan dibuka. Diterima dari `cmdBuka()` (argumen dari user) atau `main()` (`argv[1]`). |
 | `fp` | Lokal | Variabel lokal | Pointer ke file. Hidup sebentar, ditutup sebelum return. |
 | `barisTemp` | Lokal | Variabel lokal | Tempat menampung satu baris dari file. `+4` untuk jaga-jaga `\r\n`. |
 | `firstLine` | Lokal | Variabel lokal | Penanda. `1` = ini baris pertama, `0` = bukan. |
 | `len` | Lokal | Variabel lokal | Panjang baris sementara. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdBuka()` | Saat user tekan `o <file>` | `&buf` (global), `argumen` (nama file dari user) |
+| `main()` | Saat program dijalankan dengan argumen | `&buf` (global), `argv[1]` (nama file dari command line) |
 
 **Penjelasan baris per baris:**
 
@@ -948,10 +1080,16 @@ int fileSave(TextBuffer *buf, char *filename) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `filename` | Argumen | Parameter | Nama file tujuan. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdSimpan()`. |
+| `filename` | Argumen | Parameter | Nama file tujuan. Diterima dari `cmdSimpan()` (nama file global). |
 | `fp` | Lokal | Variabel lokal | Pointer ke file. |
 | `node` | Lokal | Variabel lokal | Pointer yang mengikuti field `next` dari `buf->head` ke ujung rantai. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdSimpan()` | Saat user tekan `s [file]` | `&buf` (global), `namaFile` (global, array char) |
 
 **Penjelasan:**
 
@@ -1010,9 +1148,16 @@ void fileClose(TextBuffer *buf) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdTutup()` atau `fileOpen()`. |
 | `cur` | Lokal | Variabel lokal | Gerbong yang sedang dihapus. |
 | `next` | Lokal | Variabel lokal | Gerbong berikutnya yang harus disimpan sebelum `cur` dihapus. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdTutup()` | Saat user tekan `w` (tutup) | `&buf` (global) |
+| `fileOpen()` | Saat akan membuka file baru (membersihkan buffer lama) | `&buf` (global) |
 
 **Penjelasan:**
 
@@ -1098,9 +1243,9 @@ int replaceText(TextBuffer *buf, char *cari, char *ganti) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `cari` | Argumen | Parameter | String yang dicari. |
-| `ganti` | Argumen | Parameter | String pengganti. |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari `cmdReplace()`. |
+| `cari` | Argumen | Parameter | String yang dicari. Diterima dari `cmdReplace()` (input dari user). |
+| `ganti` | Argumen | Parameter | String pengganti. Diterima dari `cmdReplace()` (input dari user). |
 | `cariLen` | Lokal | Variabel lokal | Panjang `cari`. |
 | `gantiLen` | Lokal | Variabel lokal | Panjang `ganti`. |
 | `count` | Lokal | Variabel lokal | Berapa kali ganti berhasil. Return value. |
@@ -1110,6 +1255,12 @@ int replaceText(TextBuffer *buf, char *cari, char *ganti) {
 | `i` | Lokal | Variabel lokal | Index baca di `node->text`. |
 | `rowLen` | Lokal | Variabel lokal | Panjang baris asli. |
 | `replaced` | Lokal | Variabel lokal | Penanda apakah baris ini berubah. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdReplace()` | Saat user tekan `f` lalu isi cari & ganti | `&buf` (global), `cari` (input user), `ganti` (input user) |
 
 **Penjelasan baris per baris:**
 
@@ -1195,14 +1346,30 @@ void displayBuffer(TextBuffer *buf, char *namaFile, int modified) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `buf` | Argumen | Parameter | Pointer ke buffer. |
-| `namaFile` | Argumen | Parameter | Nama file yang ditampilkan. |
-| `modified` | Argumen | Parameter | Status modifikasi (0 atau 1). |
+| `buf` | Argumen | Parameter | Pointer ke buffer. Diterima dari fungsi `cmd*` atau `main()`. |
+| `namaFile` | Argumen | Parameter | Nama file yang ditampilkan. Diterima dari fungsi `cmd*` (global `namaFile`). |
+| `modified` | Argumen | Parameter | Status modifikasi (0 atau 1). Diterima dari fungsi `cmd*` (global `modified`). |
 | `cur` | Lokal | Variabel lokal | Pointer yang mengikuti field `next` dari `buf->head` ke ujung rantai. |
 | `i` | Lokal | Variabel lokal | Counter nomor baris (0-based). |
 | `penanda` | Lokal | Variabel lokal | `>` atau spasi. |
 | `tampilNama` | Lokal | Variabel lokal | Pointer ke string yang ditampilkan. |
 | `tampilModified` | Lokal | Variabel lokal | `" [*]"` atau `""`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdInsert()` | Setelah menulis teks | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdInsertBaris()` | Setelah membuat baris baru | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdHapusKarakter()` | Setelah menghapus karakter | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdHapusBaris()` | Setelah menghapus baris | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdGoto()` | Setelah pindah baris | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdReplace()` | Setelah replace | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdBuka()` | Setelah buka file | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdTutup()` | Setelah tutup buffer | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdUndo()` | Setelah undo | `&buf`, `namaFile`, `modified` (semua global) |
+| `cmdRedo()` | Setelah redo | `&buf`, `namaFile`, `modified` (semua global) |
+| `main()` | Saat program mulai atau setelah buka file argumen | `&buf`, `namaFile`, `modified` (semua global) |
 
 **Penjelasan:**
 
@@ -1308,8 +1475,17 @@ int tanyaKonfirmasi(char *pertanyaan) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `pertanyaan` | Argumen | Parameter | String pertanyaan yang ditampilkan. |
+| `pertanyaan` | Argumen | Parameter | String pertanyaan yang ditampilkan. Diterima dari `cmdBuka()`, `cmdTutup()`, `cmdKeluar()`, `cmdHapusFile()`. |
 | `jawab` | Lokal | Variabel lokal | Tempat menampung jawaban user. Hanya 8 karakter, cukup untuk `y\n` atau `n\n`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdBuka()` | Saat ada perubahan belum disimpan, user mau buka file baru | String literal: `"[PERINGATAN] Ada perubahan belum disimpan. Lanjut?"` |
+| `cmdTutup()` | Saat ada perubahan belum disimpan, user mau tutup buffer | String literal: `"[PERINGATAN] Ada perubahan belum disimpan. Lanjut?"` |
+| `cmdKeluar()` | Saat ada perubahan belum disimpan, user mau keluar | String literal: `"[PERINGATAN] Ada perubahan belum disimpan. Keluar?"` |
+| `cmdHapusFile()` | Saat user mau menghapus file | String literal: `"Yakin?"` |
 
 **Logika:**
 
@@ -1337,8 +1513,14 @@ void bersihkanNewline(char *str) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `str` | Argumen | Parameter | String yang akan dibersihkan. Harus pointer supaya bisa ubah isi. |
+| `str` | Argumen | Parameter | String yang akan dibersihkan. Harus pointer supaya bisa ubah isi. Diterima dari `cmdReplace()`. |
 | `len` | Lokal | Variabel lokal | Panjang string. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `cmdReplace()` | Setelah user input "cari" dan "ganti" | `cari` (array lokal di `cmdReplace`) dan `ganti` (array lokal di `cmdReplace`) |
 
 ---
 
@@ -1379,9 +1561,15 @@ void cmdInsert(char *teks) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `teks` | Argumen | Parameter | Teks dari user. |
+| `teks` | Argumen | Parameter | Teks dari user. Diterima dari `prosesPerintah()` (hasil parsing `sscanf`). |
 | `row` | Lokal | Variabel lokal | Menyimpan `buf.currentRow` sebelum diubah (untuk pesan `[OK]`). |
 | `node` | Lokal | Variabel lokal | Hasil `getNode`. Menunjuk ke baris aktif. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `i <teks>` | `argumen` (hasil `sscanf` dari input user) |
 
 **Logika:**
 
@@ -1407,6 +1595,12 @@ void cmdInsertBaris(char *teks) {
 ```
 
 **Logika:** Simpan undo, lalu panggil `bufferInsertBaris`. Kursor otomatis pindah ke baris baru.
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `ia <teks>` | `argumen` (hasil `sscanf` dari input user) |
 
 ---
 
@@ -1437,8 +1631,14 @@ void cmdHapusKarakter(char *argumen) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `argumen` | Argumen | Parameter | String jumlah karakter dari user. |
+| `argumen` | Argumen | Parameter | String jumlah karakter dari user. Diterima dari `prosesPerintah()` (hasil parsing `sscanf`). |
 | `jumlah` | Lokal | Variabel lokal | Hasil `atoi(argumen)`. Default 1. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `d [n]` | `argumen` (hasil `sscanf` dari input user) |
 
 ---
 
@@ -1460,6 +1660,12 @@ void cmdHapusBaris(void) {
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
 | `baris_lama` | Lokal | Variabel lokal | Nomor baris yang dihapus, dicatat **sebelum** dihapus. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `dl` | Tidak ada argumen (dipanggil dengan `cmdHapusBaris()`) |
 
 ---
 
@@ -1490,8 +1696,14 @@ void cmdGoto(char *argumen) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `argumen` | Argumen | Parameter | String nomor baris dari user. |
+| `argumen` | Argumen | Parameter | String nomor baris dari user. Diterima dari `prosesPerintah()` (hasil parsing `sscanf`). |
 | `nomor` | Lokal | Variabel lokal | Hasil `atoi(argumen)`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `g <nomor>` | `argumen` (hasil `sscanf` dari input user) |
 
 **Logika:**
 
@@ -1542,9 +1754,15 @@ void cmdReplace(void) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `cari` | Lokal | Variabel lokal | String yang dicari. |
-| `ganti` | Lokal | Variabel lokal | String pengganti. |
+| `cari` | Lokal | Variabel lokal | String yang dicari. Dibaca dari `stdin` pakai `fgets` lalu dibersihkan `bersihkanNewline()`. |
+| `ganti` | Lokal | Variabel lokal | String pengganti. Dibaca dari `stdin` pakai `fgets` lalu dibersihkan `bersihkanNewline()`. |
 | `jumlah` | Lokal | Variabel lokal | Hasil `replaceText`. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `f` | Tidak ada argumen (fungsi baca input sendiri) |
 
 ---
 
@@ -1587,6 +1805,13 @@ void cmdBuka(char *argumen) {
 - Kalau `fileOpen` berhasil, simpan nama file, reset undo/redo, tandai `modified = 0` (baru dibuka, belum ada perubahan).
 - Kalau gagal, pesan error.
 
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `o <file>` | `argumen` (nama file dari input user) |
+| `main()` | Saat program dijalankan dengan argumen | `argv[1]` (nama file dari command line) |
+
 ---
 
 #### `cmdSimpan()` — Perintah `s [file]`
@@ -1616,6 +1841,12 @@ void cmdSimpan(char *argumen) {
 
 **Logika:** Kalau user kasih nama file, simpan nama tersebut. Kalau `namaFile` masih kosong, error. Kalau simpan berhasil, `modified = 0`.
 
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `s [file]` | `argumen` (nama file dari input user, bisa kosong) |
+
 ---
 
 #### `cmdTutup()` — Perintah `w`
@@ -1644,6 +1875,12 @@ void cmdTutup(void) {
 ```
 
 **Logika:** Tutup buffer (bebaskan memori), inisialisasi ulang, kosongkan nama file, reset undo/redo, tampilkan buffer kosong.
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `w` | Tidak ada argumen |
 
 ---
 
@@ -1681,6 +1918,12 @@ void cmdHapusFile(char *argumen) {
 
 **Logika:** `remove(argumen) == 0` artinya berhasil. Kalau file yang dihapus sama dengan `namaFile` (file yang sedang dibuka), reset `namaFile` karena file aslinya sudah tidak ada.
 
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `del <file>` | `argumen` (nama file dari input user) |
+
 ---
 
 #### `cmdUndo()` dan `cmdRedo()`
@@ -1713,6 +1956,18 @@ void cmdRedo(void) {
 
 **Logika:** `bufferUndo` / `bufferRedo` return `1` kalau berhasil. Kalau `0`, tampilkan info. `modified = 1` karena undo/redo juga termasuk perubahan (buffer jadi beda dari file di disk).
 
+**Dipanggil oleh `cmdUndo`:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `u` | Tidak ada argumen |
+
+**Dipanggil oleh `cmdRedo`:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `r` | Tidak ada argumen |
+
 ---
 
 #### `cmdKeluar()` — Perintah `q`
@@ -1734,6 +1989,12 @@ void cmdKeluar(void) {
 ```
 
 **Logika:** Cek ada perubahan. Kalau ada, tanya. Kalau user yakin, `exit(0)` langsung hentikan program.
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `prosesPerintah()` | Saat user tekan `q` | Tidak ada argumen |
 
 ---
 
@@ -1778,9 +2039,15 @@ void prosesPerintah(char *input) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `input` | Argumen | Parameter | Input user dari `main()`. |
+| `input` | Argumen | Parameter | Input user dari `main()`. Diterima dari `main()` (array `cmd` yang dibaca pakai `fgets`). |
 | `perintah` | Lokal | Variabel lokal | Menampung perintah (misal `"i"`, `"ia"`, `"g"`). |
 | `argumen` | Lokal | Variabel lokal | Menampung argumen (misal `"Halo dunia"`, `"3"`). |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| `main()` | Setiap kali user mengetik perintah | `cmd` (array lokal di `main`, hasil `fgets`) |
 
 **Logika:**
 
@@ -1854,10 +2121,16 @@ int main(int argc, char *argv[]) {
 
 | Variabel | Sumber | Jenis | Keterangan |
 |----------|--------|-------|------------|
-| `argc` | Argumen | Parameter | Jumlah argumen command line dari sistem operasi. |
-| `argv` | Argumen | Parameter | Array of string. `argv[0]` = nama program, `argv[1]` = argumen pertama. |
+| `argc` | Argumen | Parameter | Jumlah argumen command line dari sistem operasi. Dari OS saat program dijalankan. |
+| `argv` | Argumen | Parameter | Array of string. `argv[0]` = nama program, `argv[1]` = argumen pertama. Dari OS saat program dijalankan. |
 | `cmd` | Lokal | Variabel lokal | Menampung input user dari `fgets`. |
 | `len` | Lokal | Variabel lokal | Panjang input setelah dihapus newline. |
+
+**Dipanggil oleh:**
+
+| Pemanggil | Kapan dipanggil | Argumen yang dikirim |
+|-----------|-----------------|---------------------|
+| Sistem operasi | Saat program dijalankan | `argc` (jumlah argumen), `argv` (array argumen) |
 
 **Logika:**
 
